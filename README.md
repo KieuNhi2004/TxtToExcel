@@ -1,150 +1,45 @@
-# TXT → Excel Extractor
+# TXT to Excel + Thống kê Excel
 
-Ứng dụng web Python + FastAPI để:
+Ứng dụng gồm 2 tab:
 
-1. Người dùng tải file `.txt`.
-2. Khai báo dấu hiệu bắt đầu và kết thúc của từng cụm.
-3. Khai báo các trường cần bóc tách.
-4. Xem trước dữ liệu.
-5. Xuất thành file Excel `.xlsx`.
+1. **Bóc tách TXT**: START/END, START → START tiếp theo → EOF, nhiều trường, nhiều dòng, regex, xuất Excel.
+2. **Thống kê Excel**: upload `.xlsx/.xls`, chọn sheet và các cột dữ liệu để tạo thống kê.
 
-## Cài đặt
+## Tab Thống kê Excel
 
-Khuyến nghị Python 3.10+.
+Chọn:
+- Cột ngày/thời gian: bắt buộc.
+- Cột lợi nhuận: bắt buộc.
+- Cột nhóm/loại: tùy chọn, tạo biểu đồ tỷ lệ lợi nhuận theo nhóm.
+- Cột doanh thu: tùy chọn.
+- Cột chi phí: tùy chọn.
+
+Ứng dụng tạo:
+- Tổng lợi nhuận.
+- Lợi nhuận trung bình.
+- Số dòng và số dòng hợp lệ.
+- Lợi nhuận theo tháng.
+- Tăng trưởng lợi nhuận theo tháng.
+- Lợi nhuận theo năm.
+- Tăng trưởng lợi nhuận theo năm.
+- Tỷ lệ lợi nhuận theo nhóm/loại.
+- Doanh thu, chi phí và lợi nhuận theo tháng nếu các cột tương ứng được chọn.
+
+## Chạy local
 
 ```bash
 python -m venv venv
-```
-
-Windows:
-
-```bash
-venv\Scripts\activate
-```
-
-Cài thư viện:
-
-```bash
+venv\\Scripts\\activate
 pip install -r requirements.txt
-```
-
-## Chạy
-
-```bash
 uvicorn app.main:app --reload
 ```
 
-Mở trình duyệt:
+Mở `http://127.0.0.1:8000`.
 
-```text
-http://127.0.0.1:8000
-```
+## Render
 
-## Các kiểu bóc tách
+Build Command:
+`pip install -r requirements.txt`
 
-### 1. Lấy sau từ khóa
-
-Ví dụ:
-
-```text
-Ngày: 12/03/2026
-```
-
-Từ khóa:
-
-```text
-Ngày:
-```
-
-Kết quả:
-
-```text
-12/03/2026
-```
-
-### 2. Lấy giữa 2 từ khóa
-
-Ví dụ:
-
-```text
-Tên: Nguyễn Văn A
-Mã: GD001
-```
-
-Bắt đầu:
-
-```text
-Tên:
-```
-
-Kết thúc:
-
-```text
-Mã:
-```
-
-Kết quả:
-
-```text
-Nguyễn Văn A
-```
-
-### 3. Regex
-
-Ví dụ:
-
-```text
-Ngày: 12/03/2026
-```
-
-Regex:
-
-```regex
-Ngày:\s*(\d{2}/\d{2}/\d{4})
-```
-
-### 4. Kiểu Date
-
-Các định dạng phổ biến được hỗ trợ:
-
-```text
-12/03/2026
-12-03-2026
-2026-03-12
-12/03/2026 14:30
-```
-
-### 5. Kiểu Number
-
-Có hỗ trợ các dạng như:
-
-```text
-1.500.000
-2,000
-1500000
-```
-
-## Luồng xử lý
-
-```text
-START
-  ↓
-Cụm dữ liệu
-  ↓
-END
-  ↓
-Cụm tiếp theo
-```
-
-Mỗi record chỉ được bóc tách bên trong chính cụm START → END đó, tránh lấy nhầm dữ liệu của record khác.
-
-
-## Không có dấu hiệu kết thúc
-
-Chọn **Không có dấu hiệu kết thúc** nếu file chỉ có START. App sẽ tách:
-
-```text
-START 1 -> START 2 = Cụm 1
-START 2 -> START 3 = Cụm 2
-START 3 -> hết file = Cụm 3
-```
+Start Command:
+`uvicorn app.main:app --host 0.0.0.0 --port $PORT`

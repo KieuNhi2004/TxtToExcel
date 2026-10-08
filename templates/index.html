@@ -3,69 +3,78 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TXT → Excel</title>
+    <title>TXT → Excel + Thống kê</title>
     <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
 <div class="container">
     <h1>TXT → Excel</h1>
-    <p class="subtitle">Bóc tách dữ liệu theo từng cụm START → END</p>
+    <p class="subtitle">Bóc tách dữ liệu và phân tích file Excel.</p>
 
-    <section class="card">
-        <h2>1. Chọn file TXT</h2>
-        <input id="file" type="file" accept=".txt">
-        <div id="fileName" class="muted">Chưa chọn file</div>
+    <div class="tabs">
+        <button class="tab active" data-tab="extract">Bóc tách TXT</button>
+        <button class="tab" data-tab="analytics">Thống kê Excel</button>
+    </div>
+
+    <section id="extract" class="tab-content active">
+        <div class="card">
+            <h2>1. File TXT</h2>
+            <input id="file" type="file" accept=".txt">
+        </div>
+        <div class="card">
+            <h2>2. Chia khối dữ liệu</h2>
+            <label>Dấu bắt đầu</label>
+            <input id="startMarker" value="START" placeholder="Ví dụ: START">
+            <label>Dấu kết thúc - có thể để trống</label>
+            <input id="endMarker" placeholder="Ví dụ: END">
+            <label class="check"><input id="noEndMarker" type="checkbox"> File không có END: START tiếp theo là điểm kết thúc khối trước</label>
+        </div>
+        <div class="card">
+            <div class="section-head"><h2>3. Các trường cần lấy</h2><button id="addField" class="secondary">+ Thêm trường</button></div>
+            <div id="fields"></div>
+        </div>
+        <div class="actions"><button id="previewBtn">Xem trước</button><button id="exportBtn" class="primary">Xuất Excel</button></div>
+        <div class="card"><h2>4. Kết quả</h2><div id="summary"></div><div id="errors"></div><div id="tableWrap"></div></div>
     </section>
 
-    <section class="card">
-        <h2>2. Xác định cụm dữ liệu</h2>
-
-        <label>Dấu hiệu bắt đầu cụm</label>
-        <textarea id="startMarker" rows="2" placeholder="Ví dụ: THÔNG TIN GIAO DỊCH"></textarea>
-
-        <label>Dấu hiệu kết thúc cụm</label>
-        <textarea id="endMarker" rows="2" placeholder="Ví dụ: ------------------------"></textarea>
-
-        <label class="check-row">
-            <input type="checkbox" id="noEndMarker" onchange="toggleEndMarker()">
-            <span>Không có dấu hiệu kết thúc</span>
-        </label>
-
-        <div class="hint" id="blockHint">
-            Có END: <b>START → dữ liệu → END</b>
+    <section id="analytics" class="tab-content">
+        <div class="card">
+            <h2>1. Chọn file Excel</h2>
+            <input id="excelFile" type="file" accept=".xlsx,.xls">
+            <div id="excelInfo" class="hint hidden"></div>
         </div>
-    </section>
-
-    <section class="card">
-        <div class="section-title">
-            <h2>3. Các trường cần bóc tách</h2>
-            <button type="button" class="secondary" onclick="addField()">+ Thêm trường</button>
+        <div class="card">
+            <h2>2. Chọn trường dữ liệu để thống kê</h2>
+            <div class="grid-2">
+                <div><label>Sheet</label><select id="sheetSelect" disabled></select></div>
+                <div><label>Cột ngày/thời gian *</label><select id="dateCol" disabled></select></div>
+                <div><label>Cột lợi nhuận *</label><select id="profitCol" disabled></select></div>
+                <div><label>Cột nhóm / loại (tùy chọn)</label><select id="categoryCol" disabled></select></div>
+                <div><label>Cột doanh thu (tùy chọn)</label><select id="revenueCol" disabled></select></div>
+                <div><label>Cột chi phí (tùy chọn)</label><select id="costCol" disabled></select></div>
+            </div>
+            <button id="analyzeBtn" class="primary" disabled>Phân tích dữ liệu</button>
         </div>
-
-        <div id="fields"></div>
-    </section>
-
-    <section class="actions">
-        <button id="previewBtn" onclick="preview()">Xem trước</button>
-        <button id="exportBtn" class="primary" onclick="exportExcel()">Xuất Excel</button>
-    </section>
-
-    <section id="status" class="status hidden"></section>
-
-    <section id="previewSection" class="card hidden">
-        <div class="section-title">
-            <h2>Xem trước</h2>
-            <span id="count"></span>
+        <div id="analyticsResult" class="hidden">
+            <div class="stats-cards">
+                <div class="stat"><span>Tổng lợi nhuận</span><strong id="totalProfit">-</strong></div>
+                <div class="stat"><span>Lợi nhuận trung bình</span><strong id="avgProfit">-</strong></div>
+                <div class="stat"><span>Số dòng</span><strong id="rowCount">-</strong></div>
+                <div class="stat"><span>Dữ liệu hợp lệ</span><strong id="validCount">-</strong></div>
+            </div>
+            <div id="analyticsErrors"></div>
+            <div class="chart-grid">
+                <div class="card chart-card"><h2>Lợi nhuận theo tháng</h2><canvas id="monthlyChart"></canvas></div>
+                <div class="card chart-card"><h2>Tăng trưởng lợi nhuận theo tháng</h2><canvas id="growthChart"></canvas></div>
+                <div class="card chart-card"><h2>Lợi nhuận theo năm</h2><canvas id="annualChart"></canvas></div>
+                <div class="card chart-card"><h2>Tăng trưởng lợi nhuận theo năm</h2><canvas id="annualGrowthChart"></canvas></div>
+                <div class="card chart-card" id="categoryCard"><h2>Tỷ lệ lợi nhuận theo nhóm</h2><canvas id="categoryChart"></canvas></div>
+                <div class="card chart-card" id="revenueCostCard"><h2>Doanh thu / Chi phí / Lợi nhuận theo tháng</h2><canvas id="revenueCostChart"></canvas></div>
+            </div>
         </div>
-        <div class="table-wrap">
-            <table id="previewTable"></table>
-        </div>
-
-        <h3>Cảnh báo</h3>
-        <ul id="errors"></ul>
     </section>
 </div>
-
 <script src="/static/app.js"></script>
 </body>
 </html>

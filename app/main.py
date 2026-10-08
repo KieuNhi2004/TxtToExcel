@@ -1,327 +1,222 @@
-from pathlib import Path
 import io
+import json
 import re
 from datetime import datetime
+from typing import Any
 
 import pandas as pd
-from fastapi import FastAPI, File, Form, UploadFile, HTTPException
+from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from starlette.requests import Request
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-TEMPLATE_DIR = BASE_DIR / "templates"
-STATIC_DIR = BASE_DIR / "static"
+from .parser import parse_text
 
-app = FastAPI(title="TXT → Excel Extractor", version="1.0.0")
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-
-
-@app.get("/", response_class=HTMLResponse)
-async def home():
-    return (TEMPLATE_DIR / "index.html").read_text(encoding="utf-8")
+app = FastAPI(title="TXT to Excel + Analytics")
+app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates")
 
 
-def split_blocks(text: str, start_marker: str, end_marker: str = ""):
-    """
-    Tách dữ liệu theo 2 chế độ:
-
-    1. Có END: START -> dữ liệu -> END
-    2. Không có END: START -> dữ liệu -> START tiếp theo;
-       START cuối -> dữ liệu -> hết file.
-    """
-    if not start_marker:
-        raise ValueError("Dấu hiệu bắt đầu không được để trống.")
-
-    blocks = []
-    start_positions = []
-    pos = 0
-
-    while True:
-        start = text.find(start_marker, pos)
-        if start == -1:
-            break
-        start_positions.append(start)
-        pos = start + len(start_marker)
-
-    if not start_positions:
-        return blocks
-
-    # Không có END: START tiếp theo là ranh giới của cụm hiện tại.
-    if not end_marker:
-        for i, start in enumerate(start_positions):
-            next_start = start_positions[i + 1] if i + 1 < len(start_positions) else len(text)
-            blocks.append({"text": text[start:next_start], "closed": True})
-        return blocks
-
-    # Có END: không cho phép tìm END vượt qua START kế tiếp.
-    for i, start in enumerate(start_positions):
-        content_start = start + len(start_marker)
-        next_start = start_positions[i + 1] if i + 1 < len(start_positions) else len(text)
-        end = text.find(end_marker, content_start, next_start)
-
-        if end == -1:
-            blocks.append({"text": text[start:next_start], "closed": False})
-        else:
-            blocks.append({"text": text[start:end + len(end_marker)], "closed": True})
-
-    return blocks
-
-
-def extract_after(block: str, marker: str) -> str:
-    idx = block.find(marker)
-    if idx == -1:
-        return ""
-    value = block[idx + len(marker):]
-    return value.splitlines()[0].strip() if value.splitlines() else value.strip()
-
-
-def extract_before(block: str, marker: str) -> str:
-    idx = block.find(marker)
-    if idx == -1:
-        return ""
-    lines = block[:idx].splitlines()
-    return lines[-1].strip() if lines else block[:idx].strip()
-
-
-def extract_between(block: str, start: str, end: str) -> str:
-    a = block.find(start)
-    if a == -1:
-        return ""
-    a += len(start)
-    b = block.find(end, a)
-    if b == -1:
-        return block[a:].strip()
-    return block[a:b].strip()
-
-
-def extract_regex(block: str, pattern: str) -> str:
-    try:
-        m = re.search(pattern, block, flags=re.MULTILINE)
-    except re.error:
-        return ""
-    if not m:
-        return ""
-    if m.lastindex:
-        return m.group(1).strip()
-    return m.group(0).strip()
-
-
-def convert_value(value: str, data_type: str):
-    value = value.strip()
-    if not value:
-        return ""
-
-    if data_type == "date":
-        formats = [
-            "%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d",
-            "%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M",
-            "%d-%m-%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S"
-        ]
-        for fmt in formats:
-            try:
-                return datetime.strptime(value, fmt)
-            except ValueError:
-                pass
-
-        # Tự tìm ngày trong chuỗi nếu có tiền tố như "Ngày: 12/03/2026"
-        m = re.search(r"\b(\d{1,2}[/-]\d{1,2}[/-]\d{4})\b", value)
-        if m:
-            raw = m.group(1).replace("-", "/")
-            try:
-                return datetime.strptime(raw, "%d/%m/%Y")
-            except ValueError:
-                pass
-        return value
-
-    if data_type == "number":
-        cleaned = re.sub(r"[^\d,.\-]", "", value)
-        if not cleaned:
-            return ""
-        # Hỗ trợ 1.500.000 và 1,500.50
-        if cleaned.count(".") > 1 and "," not in cleaned:
-            cleaned = cleaned.replace(".", "")
-        elif "." in cleaned and "," in cleaned:
-            if cleaned.rfind(",") > cleaned.rfind("."):
-                cleaned = cleaned.replace(".", "").replace(",", ".")
-            else:
-                cleaned = cleaned.replace(",", "")
-        elif "," in cleaned:
-            # 1,5 => decimal; 1,500 => thường là hàng nghìn
-            parts = cleaned.split(",")
-            if len(parts[-1]) == 3:
-                cleaned = cleaned.replace(",", "")
-            else:
-                cleaned = cleaned.replace(",", ".")
+def read_txt(data: bytes) -> str:
+    for encoding in ("utf-8-sig", "utf-8", "cp1258", "cp1252"):
         try:
-            return float(cleaned)
-        except ValueError:
-            return value
-
-    return value
-
-
-def parse_fields(block: str, fields):
-    result = {}
-    for field in fields:
-        name = field.get("name", "").strip()
-        mode = field.get("mode", "after")
-        data_type = field.get("type", "text")
-        marker = field.get("marker", "")
-        end_marker = field.get("end_marker", "")
-        pattern = field.get("pattern", "")
-
-        if not name:
+            return data.decode(encoding)
+        except UnicodeDecodeError:
             continue
+    return data.decode("utf-8", errors="replace")
 
-        if mode == "after":
-            value = extract_after(block, marker)
-        elif mode == "before":
-            value = extract_before(block, marker)
-        elif mode == "between":
-            value = extract_between(block, marker, end_marker)
-        elif mode == "regex":
-            value = extract_regex(block, pattern)
-        elif mode == "line":
-            value = extract_after(block, marker)
-        else:
-            value = ""
 
-        result[name] = convert_value(value, data_type)
+def json_safe(v: Any):
+    if pd.isna(v):
+        return None
+    if isinstance(v, (pd.Timestamp, datetime)):
+        return v.strftime("%Y-%m-%d")
+    if hasattr(v, "item"):
+        return v.item()
+    return v
 
+
+def numeric_series(series: pd.Series) -> pd.Series:
+    if pd.api.types.is_numeric_dtype(series):
+        return pd.to_numeric(series, errors="coerce")
+    def conv(x):
+        if pd.isna(x):
+            return None
+        s = re.sub(r"[^\d,.\-]", "", str(x))
+        if not s:
+            return None
+        try:
+            if "," in s and "." in s:
+                if s.rfind(",") > s.rfind("."):
+                    s = s.replace(".", "").replace(",", ".")
+                else:
+                    s = s.replace(",", "")
+            elif "." in s and s.count(".") > 1:
+                s = s.replace(".", "")
+            elif "," in s and s.count(",") > 1:
+                s = s.replace(",", "")
+            elif "," in s:
+                a, b = s.rsplit(",", 1)
+                s = a.replace(",", "") + ("." + b if len(b) <= 2 else b)
+            return float(s)
+        except Exception:
+            return None
+    return series.map(conv)
+
+
+def date_series(series: pd.Series) -> pd.Series:
+    return pd.to_datetime(series, errors="coerce", dayfirst=True)
+
+
+def aggregate_time(df: pd.DataFrame, date_col: str, value_col: str, freq: str):
+    d = df[[date_col, value_col]].copy()
+    d[date_col] = date_series(d[date_col])
+    d[value_col] = numeric_series(d[value_col])
+    d = d.dropna(subset=[date_col, value_col])
+    if d.empty:
+        return []
+    d["period"] = d[date_col].dt.to_period(freq)
+    grouped = d.groupby("period")[value_col].sum().sort_index()
+    return [{"period": str(k), "value": float(v)} for k, v in grouped.items()]
+
+
+def growth_from_series(points):
+    result = []
+    previous = None
+    for p in points:
+        growth = None if previous in (None, 0) else (p["value"] - previous) / abs(previous) * 100
+        result.append({**p, "growth": None if growth is None else round(growth, 2)})
+        previous = p["value"]
     return result
 
 
-def process_text(text: str, start_marker: str, end_marker: str, fields):
-    blocks = split_blocks(text, start_marker, end_marker)
-    rows = []
-    errors = []
+def excel_columns(data: bytes, filename: str):
+    try:
+        xls = pd.ExcelFile(io.BytesIO(data))
+        sheets = xls.sheet_names
+        frames = {sheet: pd.read_excel(xls, sheet_name=sheet) for sheet in sheets}
+        return sheets, frames, None
+    except Exception as e:
+        return [], {}, f"Không đọc được Excel: {e}"
 
-    for index, block_info in enumerate(blocks, start=1):
-        row = parse_fields(block_info["text"], fields)
-        row["__STT__"] = index
 
-        if not block_info["closed"]:
-            errors.append(f"Cụm #{index}: không tìm thấy dấu hiệu kết thúc.")
-
-        missing = [
-            f.get("name", "")
-            for f in fields
-            if f.get("name", "").strip() and not row.get(f.get("name", "").strip())
-        ]
-        if missing:
-            errors.append(
-                f"Cụm #{index}: thiếu dữ liệu ở: {', '.join(missing)}"
-            )
-
-        rows.append(row)
-
-    return rows, errors
+@app.get("/", response_class=HTMLResponse)
+async def home(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
 
 
 @app.post("/api/preview")
-async def preview(
-    file: UploadFile = File(...),
-    start_marker: str = Form(...),
-    end_marker: str = Form(...),
-    fields_json: str = Form(...)
-):
-    import json
-
-    if not file.filename.lower().endswith(".txt"):
-        raise HTTPException(400, "Chỉ hỗ trợ file .txt.")
-
+async def preview(file: UploadFile = File(...), config: str = Form(...)):
+    if not file.filename or not file.filename.lower().endswith(".txt"):
+        return {"ok": False, "errors": ["Chỉ hỗ trợ file .txt"]}
     try:
-        fields = json.loads(fields_json)
+        cfg = json.loads(config)
     except Exception:
-        raise HTTPException(400, "Cấu hình trường không hợp lệ.")
-
-    raw = await file.read()
-    try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError:
-        try:
-            text = raw.decode("utf-8-sig")
-        except UnicodeDecodeError:
-            text = raw.decode("cp1258", errors="replace")
-
-    rows, errors = process_text(text, start_marker, end_marker, fields)
-
-    clean_rows = []
-    for row in rows[:100]:
-        clean = {k: (v.isoformat() if isinstance(v, datetime) else v)
-                 for k, v in row.items() if k != "__STT__"}
-        clean_rows.append(clean)
-
-    return {
-        "total": len(rows),
-        "errors": errors[:100],
-        "columns": [f["name"] for f in fields if f.get("name", "").strip()],
-        "rows": clean_rows,
-    }
+        return {"ok": False, "errors": ["Cấu hình không hợp lệ."]}
+    rows, errors, blocks = parse_text(read_txt(await file.read()), cfg)
+    return {"ok": True, "total_blocks": len(blocks), "preview": rows[:100], "errors": errors[:200]}
 
 
 @app.post("/api/export")
-async def export_excel(
-    file: UploadFile = File(...),
-    start_marker: str = Form(...),
-    end_marker: str = Form(...),
-    fields_json: str = Form(...)
-):
-    import json
-
-    if not file.filename.lower().endswith(".txt"):
-        raise HTTPException(400, "Chỉ hỗ trợ file .txt.")
-
+async def export_excel(file: UploadFile = File(...), config: str = Form(...)):
+    if not file.filename or not file.filename.lower().endswith(".txt"):
+        return {"ok": False, "errors": ["Chỉ hỗ trợ file .txt"]}
     try:
-        fields = json.loads(fields_json)
+        cfg = json.loads(config)
     except Exception:
-        raise HTTPException(400, "Cấu hình trường không hợp lệ.")
-
-    raw = await file.read()
-    for encoding in ("utf-8", "utf-8-sig", "cp1258", "cp1252"):
-        try:
-            text = raw.decode(encoding)
-            break
-        except UnicodeDecodeError:
-            text = None
-    if text is None:
-        text = raw.decode("utf-8", errors="replace")
-
-    rows, errors = process_text(text, start_marker, end_marker, fields)
-
-    columns = [f["name"] for f in fields if f.get("name", "").strip()]
-    data = [{col: row.get(col, "") for col in columns} for row in rows]
-    df = pd.DataFrame(data, columns=columns)
-
+        return {"ok": False, "errors": ["Cấu hình không hợp lệ."]}
+    rows, errors, _ = parse_text(read_txt(await file.read()), cfg)
+    df = pd.DataFrame(rows)
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="DuLieu")
-        ws = writer.book["DuLieu"]
-        ws.freeze_panes = "A2"
-        ws.auto_filter.ref = ws.dimensions
-
-        for col_cells in ws.columns:
-            max_len = 0
-            col_letter = col_cells[0].column_letter
-            for cell in col_cells:
-                value = "" if cell.value is None else str(cell.value)
-                max_len = max(max_len, len(value))
-            ws.column_dimensions[col_letter].width = min(max(max_len + 2, 12), 40)
-
-        # Định dạng ngày
-        for idx, field in enumerate(fields, start=1):
-            if field.get("type") == "date":
-                for cell in ws.iter_cols(min_col=idx, max_col=idx, min_row=2):
-                    for c in cell:
-                        if isinstance(c.value, datetime):
-                            c.number_format = "dd/mm/yyyy"
-
+        df.to_excel(writer, index=False, sheet_name="Dữ liệu")
+        if errors:
+            pd.DataFrame({"Lỗi/Cảnh báo": errors}).to_excel(writer, index=False, sheet_name="Lỗi")
     output.seek(0)
+    return StreamingResponse(output, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": 'attachment; filename="du_lieu_trich_xuat.xlsx"'})
 
-    return StreamingResponse(
-        output,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={
-            "Content-Disposition": 'attachment; filename="ket_qua.xlsx"'
-        },
-    )
+
+@app.post("/api/excel/info")
+async def excel_info(file: UploadFile = File(...)):
+    if not file.filename or not file.filename.lower().endswith((".xlsx", ".xls")):
+        return {"ok": False, "errors": ["Hãy chọn file Excel .xlsx hoặc .xls"]}
+    data = await file.read()
+    sheets, frames, error = excel_columns(data, file.filename)
+    if error:
+        return {"ok": False, "errors": [error]}
+    result = []
+    for sheet, df in frames.items():
+        result.append({
+            "sheet": sheet,
+            "rows": int(len(df)),
+            "columns": [str(c) for c in df.columns],
+            "preview": [{str(k): json_safe(v) for k, v in row.items()} for row in df.head(10).to_dict(orient="records")],
+        })
+    return {"ok": True, "sheets": result}
+
+
+@app.post("/api/excel/analyze")
+async def excel_analyze(
+    file: UploadFile = File(...),
+    sheet: str = Form(...),
+    date_col: str = Form(...),
+    profit_col: str = Form(...),
+    category_col: str = Form(""),
+    revenue_col: str = Form(""),
+    cost_col: str = Form(""),
+):
+    if not file.filename or not file.filename.lower().endswith((".xlsx", ".xls")):
+        return {"ok": False, "errors": ["Hãy chọn file Excel .xlsx hoặc .xls"]}
+    data = await file.read()
+    _, frames, error = excel_columns(data, file.filename)
+    if error or sheet not in frames:
+        return {"ok": False, "errors": [error or "Không tìm thấy sheet."]}
+    df = frames[sheet].copy()
+    missing = [c for c in [date_col, profit_col] if c not in df.columns]
+    if missing:
+        return {"ok": False, "errors": [f"Không tìm thấy cột: {', '.join(missing)}"]}
+
+    df[date_col] = date_series(df[date_col])
+    df[profit_col] = numeric_series(df[profit_col])
+    valid = df.dropna(subset=[date_col, profit_col]).copy()
+
+    monthly = aggregate_time(df, date_col, profit_col, "M")
+    annual = aggregate_time(df, date_col, profit_col, "Y")
+    monthly_growth = growth_from_series(monthly)
+    annual_growth = growth_from_series(annual)
+
+    result = {
+        "ok": True,
+        "rows": int(len(df)),
+        "valid_rows": int(len(valid)),
+        "total_profit": float(valid[profit_col].sum()) if not valid.empty else 0,
+        "average_profit": float(valid[profit_col].mean()) if not valid.empty else 0,
+        "monthly": monthly,
+        "monthly_growth": monthly_growth,
+        "annual": annual,
+        "annual_growth": annual_growth,
+        "category": [],
+        "revenue": [],
+        "cost": [],
+        "errors": [],
+    }
+
+    if category_col and category_col in df.columns:
+        cat = df.assign(_value=numeric_series(df[profit_col])).groupby(category_col)["_value"].sum().dropna().sort_values(ascending=False).head(10)
+        result["category"] = [{"name": str(k), "value": float(v)} for k, v in cat.items()]
+
+    if revenue_col and revenue_col in df.columns:
+        rev = df.assign(_value=numeric_series(df[revenue_col]))
+        result["revenue"] = aggregate_time(rev, date_col, "_value", "M")
+
+    if cost_col and cost_col in df.columns:
+        cost = df.assign(_value=numeric_series(df[cost_col]))
+        result["cost"] = aggregate_time(cost, date_col, "_value", "M")
+
+    # Basic quality checks
+    if len(valid) < len(df):
+        result["errors"].append(f"Có {len(df) - len(valid)} dòng không có ngày hoặc lợi nhuận hợp lệ và đã được bỏ qua khi thống kê.")
+    if not monthly:
+        result["errors"].append("Không tạo được dữ liệu theo tháng. Hãy kiểm tra cột ngày và cột lợi nhuận.")
+    return result
