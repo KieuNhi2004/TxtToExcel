@@ -103,8 +103,11 @@ def excel_columns(data: bytes, filename: str):
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
-
+    return templates.TemplateResponse(
+        request=request,
+        name="index.html",
+        context={}
+    )
 
 @app.post("/api/preview")
 async def preview(file: UploadFile = File(...), config: str = Form(...)):
