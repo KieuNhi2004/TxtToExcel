@@ -21,37 +21,48 @@ async def home():
     return (TEMPLATE_DIR / "index.html").read_text(encoding="utf-8")
 
 
-def split_blocks(text: str, start_marker: str, end_marker: str):
-    """Tách file thành từng cụm START ... END."""
+def split_blocks(text: str, start_marker: str, end_marker: str = ""):
+    """
+    Tách dữ liệu theo 2 chế độ:
+
+    1. Có END: START -> dữ liệu -> END
+    2. Không có END: START -> dữ liệu -> START tiếp theo;
+       START cuối -> dữ liệu -> hết file.
+    """
     if not start_marker:
         raise ValueError("Dấu hiệu bắt đầu không được để trống.")
-    if not end_marker:
-        raise ValueError("Dấu hiệu kết thúc không được để trống.")
 
     blocks = []
+    start_positions = []
     pos = 0
 
     while True:
         start = text.find(start_marker, pos)
         if start == -1:
             break
+        start_positions.append(start)
+        pos = start + len(start_marker)
 
+    if not start_positions:
+        return blocks
+
+    # Không có END: START tiếp theo là ranh giới của cụm hiện tại.
+    if not end_marker:
+        for i, start in enumerate(start_positions):
+            next_start = start_positions[i + 1] if i + 1 < len(start_positions) else len(text)
+            blocks.append({"text": text[start:next_start], "closed": True})
+        return blocks
+
+    # Có END: không cho phép tìm END vượt qua START kế tiếp.
+    for i, start in enumerate(start_positions):
         content_start = start + len(start_marker)
-        end = text.find(end_marker, content_start)
+        next_start = start_positions[i + 1] if i + 1 < len(start_positions) else len(text)
+        end = text.find(end_marker, content_start, next_start)
 
         if end == -1:
-            # Có START nhưng không có END: lấy tới cuối file để báo lỗi/preview.
-            blocks.append({
-                "text": text[start:],
-                "closed": False,
-            })
-            break
-
-        blocks.append({
-            "text": text[start:end + len(end_marker)],
-            "closed": True,
-        })
-        pos = end + len(end_marker)
+            blocks.append({"text": text[start:next_start], "closed": False})
+        else:
+            blocks.append({"text": text[start:end + len(end_marker)], "closed": True})
 
     return blocks
 

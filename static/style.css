@@ -142,3 +142,15 @@ th {
         grid-template-columns: 1fr;
     }
 }
+
+
+.check-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 12px;
+    font-weight: 500;
+}
+
+.check-row input { width: 17px; height: 17px; }
+textarea:disabled { background: #eef2f6; cursor: not-allowed; }

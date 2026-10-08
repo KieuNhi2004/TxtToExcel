@@ -86,6 +86,20 @@ function toggleExtra(select) {
         mode === "regex" ? "block" : "none";
 }
 
+function toggleEndMarker() {
+    const checked = document.getElementById("noEndMarker").checked;
+    const input = document.getElementById("endMarker");
+    const hint = document.getElementById("blockHint");
+
+    input.disabled = checked;
+    if (checked) {
+        input.value = "";
+        hint.innerHTML = 'Không có END: <b>START → dữ liệu → START tiếp theo</b>, START cuối → <b>hết file</b>.';
+    } else {
+        hint.innerHTML = 'Có END: <b>START → dữ liệu → END</b>';
+    }
+}
+
 function getFields() {
     return [...document.querySelectorAll(".field")].map(field => ({
         name: field.querySelector(".field-name").value.trim(),
@@ -102,11 +116,14 @@ function getFormData() {
     if (!file) throw new Error("Bạn chưa chọn file TXT.");
 
     const startMarker = document.getElementById("startMarker").value;
-    const endMarker = document.getElementById("endMarker").value;
+    const noEndMarker = document.getElementById("noEndMarker").checked;
+    const endMarker = noEndMarker ? "" : document.getElementById("endMarker").value;
     const fields = getFields();
 
     if (!startMarker) throw new Error("Chưa nhập dấu hiệu bắt đầu.");
-    if (!endMarker) throw new Error("Chưa nhập dấu hiệu kết thúc.");
+    if (!noEndMarker && !endMarker) {
+        throw new Error("Chưa nhập dấu hiệu kết thúc hoặc chưa chọn 'Không có dấu hiệu kết thúc'.");
+    }
     if (!fields.length) throw new Error("Bạn chưa thêm trường cần bóc tách.");
 
     const fd = new FormData();

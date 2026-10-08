@@ -137,3 +137,14 @@ Cụm tiếp theo
 ```
 
 Mỗi record chỉ được bóc tách bên trong chính cụm START → END đó, tránh lấy nhầm dữ liệu của record khác.
+
+
+## Không có dấu hiệu kết thúc
+
+Chọn **Không có dấu hiệu kết thúc** nếu file chỉ có START. App sẽ tách:
+
+```text
+START 1 -> START 2 = Cụm 1
+START 2 -> START 3 = Cụm 2
+START 3 -> hết file = Cụm 3
+```

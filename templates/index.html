@@ -26,8 +26,13 @@
         <label>Dấu hiệu kết thúc cụm</label>
         <textarea id="endMarker" rows="2" placeholder="Ví dụ: ------------------------"></textarea>
 
-        <div class="hint">
-            Mỗi cụm phải có dạng: <b>START → dữ liệu → END</b>.
+        <label class="check-row">
+            <input type="checkbox" id="noEndMarker" onchange="toggleEndMarker()">
+            <span>Không có dấu hiệu kết thúc</span>
+        </label>
+
+        <div class="hint" id="blockHint">
+            Có END: <b>START → dữ liệu → END</b>
         </div>
     </section>
 
