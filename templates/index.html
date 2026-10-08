@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TXT → Excel</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="container">
+    <h1>TXT → Excel</h1>
+    <p class="subtitle">Bóc tách dữ liệu theo từng cụm START → END</p>
+
+    <section class="card">
+        <h2>1. Chọn file TXT</h2>
+        <input id="file" type="file" accept=".txt">
+        <div id="fileName" class="muted">Chưa chọn file</div>
+    </section>
+
+    <section class="card">
+        <h2>2. Xác định cụm dữ liệu</h2>
+
+        <label>Dấu hiệu bắt đầu cụm</label>
+        <textarea id="startMarker" rows="2" placeholder="Ví dụ: THÔNG TIN GIAO DỊCH"></textarea>
+
+        <label>Dấu hiệu kết thúc cụm</label>
+        <textarea id="endMarker" rows="2" placeholder="Ví dụ: ------------------------"></textarea>
+
+        <div class="hint">
+            Mỗi cụm phải có dạng: <b>START → dữ liệu → END</b>.
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="section-title">
+            <h2>3. Các trường cần bóc tách</h2>
+            <button type="button" class="secondary" onclick="addField()">+ Thêm trường</button>
+        </div>
+
+        <div id="fields"></div>
+    </section>
+
+    <section class="actions">
+        <button id="previewBtn" onclick="preview()">Xem trước</button>
+        <button id="exportBtn" class="primary" onclick="exportExcel()">Xuất Excel</button>
+    </section>
+
+    <section id="status" class="status hidden"></section>
+
+    <section id="previewSection" class="card hidden">
+        <div class="section-title">
+            <h2>Xem trước</h2>
+            <span id="count"></span>
+        </div>
+        <div class="table-wrap">
+            <table id="previewTable"></table>
+        </div>
+
+        <h3>Cảnh báo</h3>
+        <ul id="errors"></ul>
+    </section>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
